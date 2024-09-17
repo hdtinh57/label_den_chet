@@ -16,7 +16,7 @@ class LabelTool:
         self.current_frame_index = 0
         self.bboxes = []
         self.current_bbox = None
-        self.scale_factor = 0.75  # Scale factor for image resizing
+        self.scale_factor = 0.5  # Scale factor for image resizing
 
         # Variables to handle drawing new bounding boxes
         self.drawing = False
@@ -122,7 +122,7 @@ class LabelTool:
                     # Create the CSV file if it doesn't exist
                     with open(self.elements_file, mode='w', newline='') as file:
                         writer = csv.writer(file)
-                        writer.writerow(['frame_id', 'class_id', 'color', 'action'])
+                        writer.writerow(['frame_id', 'class_id', 'color', 'action', 'gender'])
             else:
                 messagebox.showerror("Error", f"Elements folder not found: {potential_elements_folder}")
                 self.elements_folder = ""
@@ -201,16 +201,17 @@ class LabelTool:
                     cls_id = int(row['class_id'])
                     if frame_id == self.current_frame_index:
                         # Load action and color for the current frame
-                        self.frame_actions[cls_id] = {'color': row['color'], 'action': row['action']}
+                        self.frame_actions[cls_id] = {'color': row['color'], 'action': row['action'], 'gender': row['gender']}
                     elif cls_id not in self.frame_actions:
                         # Load the latest action if not set in the current frame
-                        self.frame_actions[cls_id] = {'color': row['color'], 'action': row['action']}
+                        self.frame_actions[cls_id] = {'color': row['color'], 'action': row['action'], 'gender': row['gender']}
         
         for bbox in self.bboxes:
             cls_id = bbox['class_id']
             if cls_id in self.frame_actions:
                 bbox['color'] = self.frame_actions[cls_id]['color']
                 bbox['action'] = self.frame_actions[cls_id]['action']
+                bbox['gender'] = self.frame_actions[cls_id]['gender']
 
     def display_frame(self):
         # Clear the canvas before displaying the new frame
@@ -271,7 +272,8 @@ class LabelTool:
             cls_id = bbox['class_id']
             color = bbox.get('color', '')
             action = bbox.get('action', '')
-            self.info_text.insert(tk.END, f"BBox {idx+1}: ID: {cls_id}, Coords: ({x}, {y}, {w}, {h}), Color: {color}, Action: {action}\n")
+            gender = bbox.get('gender', '')
+            self.info_text.insert(tk.END, f"BBox {idx+1}: ID: {cls_id}, Coords: ({x}, {y}, {w}, {h}), Color: {color}, Action: {action}, Gender: {gender}\n")
         self.info_text.config(state='disabled')
 
     def delete_frame(self):
@@ -415,18 +417,19 @@ class LabelTool:
 
             color = bbox.get('color', '')
             action = bbox.get('action', '')
+            gender = bbox.get('gender', '')
 
             # Check if the (frame_id, class_id) already exists
             if (frame_id, cls_id) in elements_dict:
                 # Update the existing entry
-                elements_dict[(frame_id, cls_id)] = {'frame_id': frame_id, 'class_id': cls_id, 'color': color, 'action': action}
+                elements_dict[(frame_id, cls_id)] = {'frame_id': frame_id, 'class_id': cls_id, 'color': color, 'action': action, 'gender': gender}
             else:
                 # Add new entry if not existing
-                elements_dict[(frame_id, cls_id)] = {'frame_id': frame_id, 'class_id': cls_id, 'color': color, 'action': action}
+                elements_dict[(frame_id, cls_id)] = {'frame_id': frame_id, 'class_id': cls_id, 'color': color, 'action': action, 'gender': gender}
 
         # Write back to CSV with updated elements
         with open(self.elements_file, mode='w', newline='') as file:
-            writer = csv.DictWriter(file, fieldnames=['frame_id', 'class_id', 'color', 'action'])
+            writer = csv.DictWriter(file, fieldnames=['frame_id', 'class_id', 'color', 'action', 'gender'])
             writer.writeheader()
             for data in elements_dict.values():
                 writer.writerow(data)
@@ -509,7 +512,7 @@ class LabelTool:
             # Store original coordinates before scaling
             original_x1, original_y1 = x1 / self.scale_factor, y1 / self.scale_factor
             original_x2, original_y2 = x2 / self.scale_factor, y2 / self.scale_factor
-            new_bbox = {'coords': (original_x1, original_y1, original_x2 - original_x1, original_y2 - original_y1), 'class_id': 0, 'color': '', 'action': ''}  # Default class_id to 0
+            new_bbox = {'coords': (original_x1, original_y1, original_x2 - original_x1, original_y2 - original_y1), 'class_id': 0, 'color': '', 'action': '', 'gender': ''}  # Default class_id to 0
             self.bboxes.append(new_bbox)
             self.display_frame()  # Redraw everything
             self.open_edit_dialog(new_bbox)  # Prompt to set ID
@@ -566,12 +569,17 @@ class LabelTool:
         action_entry.pack(pady=5)
         action_entry.insert(0, bbox.get('action', ''))  # Pre-fill with current action
 
+        tk.Label(edit_window, text="Enter gender:").pack(pady=5)
+        gender_entry = Entry(edit_window)
+        gender_entry.pack(pady=5)
+        gender_entry.insert(0, bbox.get('gender', ''))  # Pre-fill with current gender
         def update_values():            
             # Get the new ID
             self.save()
             new_id = id_entry.get()
             color = color_entry.get()
             action = action_entry.get()
+            gender = gender_entry.get()
             # Check if new_id already exists in current frame's bounding boxes
             if new_id.isdigit():
                 new_id = int(new_id)
@@ -580,10 +588,11 @@ class LabelTool:
                     messagebox.showerror("Error", f"ID {new_id} already exists in this frame. Please choose a unique ID.")
                     return
 
-                # Update the bounding box ID, color, and action
+                # Update the bounding box ID, color, action, and gender
                 bbox['class_id'] = new_id
                 bbox['color'] = color
                 bbox['action'] = action
+                bbox['gender'] = gender
                 self.display_frame()
                 edit_window.destroy()
 
