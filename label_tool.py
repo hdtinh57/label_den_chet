@@ -16,6 +16,7 @@ class LabelTool:
         self.current_frame_index = 0
         self.bboxes = []
         self.current_bbox = None
+        self.scale_factor = 0.5  # Scale factor for image resizing
 
         # Variables to handle drawing new bounding boxes
         self.drawing = False
@@ -44,7 +45,6 @@ class LabelTool:
         # Create a text box for showing bounding box information
         self.info_text = tk.Text(root, height=10, width=100)
         self.info_text.pack()  # Move the info box to the bottom and center it
-        # self.info_text.bind("<Button-1>", self.on_info_click)
         self.info_text.config(state='disabled')
 
         # Additional information panel
@@ -65,7 +65,7 @@ class LabelTool:
         self.next_button.pack(side=tk.RIGHT)
         self.root.bind('<Right>', lambda event: self.next_frame())
         self.root.bind('<Left>', lambda event: self.prev_frame())
-        
+
         self.prev_button = tk.Button(btn_frame, text="Previous", command=self.prev_frame)
         self.prev_button.pack(side=tk.RIGHT)
         self.undo_button = tk.Button(btn_frame, text="Undo", command=self.undo_delete)
@@ -75,8 +75,6 @@ class LabelTool:
         self.undo_delete_frame_button = tk.Button(btn_frame, text="Undo Delete Frame", command=self.undo_delete_frame)
         self.undo_delete_frame_button.pack(side=tk.LEFT)
 
-        
-
         # Initially hide navigation buttons until folders are selected
         self.toggle_navigation_buttons(False)
 
@@ -84,7 +82,6 @@ class LabelTool:
         self.folder_frame = tk.Frame(root)
         self.folder_frame.pack(expand=True)
         tk.Button(self.folder_frame, text="Browse Images Folder", command=self.browse_images_folder).pack(side=tk.LEFT, padx=5)
-        # tk.Button(self.folder_frame, text="Browse Elements Folder", command=self.browse_elements_folder).pack(side=tk.LEFT, padx=5)
 
         # Create a menu for browsing folders later
         self.create_menu()
@@ -96,7 +93,6 @@ class LabelTool:
         browse_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Browse", menu=browse_menu)
         browse_menu.add_command(label="Browse Images Folder", command=self.browse_images_folder)
-        # browse_menu.add_command(label="Browse Elements Folder", command=self.browse_elements_folder)
 
     def browse_images_folder(self):
         """Browse and select the images folder and automatically find labels and elements folders."""
@@ -126,7 +122,7 @@ class LabelTool:
                     # Create the CSV file if it doesn't exist
                     with open(self.elements_file, mode='w', newline='') as file:
                         writer = csv.writer(file)
-                        writer.writerow(['frame_id', 'class_id', 'color', 'action'])
+                        writer.writerow(['frame_id', 'class_id', 'color', 'action', 'gender'])
             else:
                 messagebox.showerror("Error", f"Elements folder not found: {potential_elements_folder}")
                 self.elements_folder = ""
@@ -139,7 +135,6 @@ class LabelTool:
                 self.folder_frame.pack_forget()  # Hide the folder selection buttons
                 self.toggle_navigation_buttons(True)  # Show navigation buttons
                 self.load_frame()
-
 
     def toggle_navigation_buttons(self, show):
         """Show or hide navigation buttons."""
@@ -167,11 +162,20 @@ class LabelTool:
         self.current_frame = Image.open(self.frame_path)
         self.img_w, self.img_h = self.current_frame.size
 
+        # Set the scale factor manually
+        self.scale_factor = self.scale_factor  
+
+        # Apply the scaling to the image
+        new_w = int(self.img_w * self.scale_factor)
+        new_h = int(self.img_h * self.scale_factor)
+        self.current_frame = self.current_frame.resize((new_w, new_h), Image.LANCZOS)
+        self.img_w, self.img_h = self.current_frame.size
+
         # Load corresponding bounding boxes from the file
         self.txt_path = os.path.join(self.output_folder, f"{os.path.splitext(frame_name)[0]}.txt")
         self.bboxes = []
         if os.path.exists(self.txt_path):
-            self.bboxes = get_bounding_boxes(self.txt_path, self.img_w, self.img_h)
+            self.bboxes = get_bounding_boxes(self.txt_path, self.img_w / self.scale_factor, self.img_h / self.scale_factor)
 
         # Initialize the undo list for this frame if not already done
         if frame_name not in self.deleted_bboxes:
@@ -197,16 +201,17 @@ class LabelTool:
                     cls_id = int(row['class_id'])
                     if frame_id == self.current_frame_index:
                         # Load action and color for the current frame
-                        self.frame_actions[cls_id] = {'color': row['color'], 'action': row['action']}
+                        self.frame_actions[cls_id] = {'color': row['color'], 'action': row['action'], 'gender': row['gender']}
                     elif cls_id not in self.frame_actions:
                         # Load the latest action if not set in the current frame
-                        self.frame_actions[cls_id] = {'color': row['color'], 'action': row['action']}
+                        self.frame_actions[cls_id] = {'color': row['color'], 'action': row['action'], 'gender': row['gender']}
         
         for bbox in self.bboxes:
             cls_id = bbox['class_id']
             if cls_id in self.frame_actions:
                 bbox['color'] = self.frame_actions[cls_id]['color']
                 bbox['action'] = self.frame_actions[cls_id]['action']
+                bbox['gender'] = self.frame_actions[cls_id]['gender']
 
     def display_frame(self):
         # Clear the canvas before displaying the new frame
@@ -236,7 +241,11 @@ class LabelTool:
 
     def draw_bboxes(self):
         for bbox in self.bboxes:
-            x, y, w, h = bbox['coords']
+            # Scale bounding box coordinates for display
+            x = int(bbox['coords'][0] * self.scale_factor)
+            y = int(bbox['coords'][1] * self.scale_factor)
+            w = int(bbox['coords'][2] * self.scale_factor)
+            h = int(bbox['coords'][3] * self.scale_factor)
             cls_id = bbox['class_id']
             bbox['rect'] = self.canvas.create_rectangle(x, y, x + w, y + h, outline="red", width=2)
             bbox['text'] = self.canvas.create_text(x, y - 10, text=f"ID: {cls_id}", fill="red")
@@ -263,8 +272,10 @@ class LabelTool:
             cls_id = bbox['class_id']
             color = bbox.get('color', '')
             action = bbox.get('action', '')
-            self.info_text.insert(tk.END, f"BBox {idx+1}: ID: {cls_id}, Coords: ({x}, {y}, {w}, {h}), Color: {color}, Action: {action}\n")
+            gender = bbox.get('gender', '')
+            self.info_text.insert(tk.END, f"BBox {idx+1}: ID: {cls_id}, Coords: ({x}, {y}, {w}, {h}), Color: {color}, Action: {action}, Gender: {gender}\n")
         self.info_text.config(state='disabled')
+
     def delete_frame(self):
         """Delete the current frame from both images and labels."""
         if not self.frames:
@@ -348,7 +359,6 @@ class LabelTool:
         # Clear the deleted frame info after undo
         self.deleted_frame_info = None
 
-
     def show_temporary_message(self, message, duration=1000):
         """Show a temporary message for a specified duration in milliseconds."""
         # Create a label to show the message
@@ -373,7 +383,7 @@ class LabelTool:
     def save(self):
         """Save the bounding boxes and elements for the current frame."""
         # Save bounding boxes to the txt file
-        update_txt_file(self.txt_path, self.bboxes, self.img_w, self.img_h)
+        update_txt_file(self.txt_path, self.bboxes, self.img_w / self.scale_factor, self.img_h / self.scale_factor)
         # Save elements information
         self.save_elements()
         self.show_temporary_message("Bounding boxes and elements saved successfully.", duration=1000)
@@ -407,22 +417,22 @@ class LabelTool:
 
             color = bbox.get('color', '')
             action = bbox.get('action', '')
+            gender = bbox.get('gender', '')
 
             # Check if the (frame_id, class_id) already exists
             if (frame_id, cls_id) in elements_dict:
                 # Update the existing entry
-                elements_dict[(frame_id, cls_id)] = {'frame_id': frame_id, 'class_id': cls_id, 'color': color, 'action': action}
+                elements_dict[(frame_id, cls_id)] = {'frame_id': frame_id, 'class_id': cls_id, 'color': color, 'action': action, 'gender': gender}
             else:
                 # Add new entry if not existing
-                elements_dict[(frame_id, cls_id)] = {'frame_id': frame_id, 'class_id': cls_id, 'color': color, 'action': action}
+                elements_dict[(frame_id, cls_id)] = {'frame_id': frame_id, 'class_id': cls_id, 'color': color, 'action': action, 'gender': gender}
 
         # Write back to CSV with updated elements
         with open(self.elements_file, mode='w', newline='') as file:
-            writer = csv.DictWriter(file, fieldnames=['frame_id', 'class_id', 'color', 'action'])
+            writer = csv.DictWriter(file, fieldnames=['frame_id', 'class_id', 'color', 'action', 'gender'])
             writer.writeheader()
             for data in elements_dict.values():
                 writer.writerow(data)
-
 
     def enable_drawing(self, event):
         """Enable drawing mode when 'H' key is pressed.""" 
@@ -440,7 +450,10 @@ class LabelTool:
         else:
             # Check if a bounding box was clicked for editing
             for bbox in self.bboxes:
-                bx, by, bw, bh = bbox['coords']
+                bx = int(bbox['coords'][0] * self.scale_factor)
+                by = int(bbox['coords'][1] * self.scale_factor)
+                bw = int(bbox['coords'][2] * self.scale_factor)
+                bh = int(bbox['coords'][3] * self.scale_factor)
                 # Check if click is near a corner for resizing
                 if self.is_near_corner(event.x, event.y, bx, by, bw, bh):
                     self.resizing = True
@@ -464,25 +477,28 @@ class LabelTool:
         elif self.resizing:
             # Update bounding box size based on mouse drag
             if self.resizing_bbox:
-                bx, by, bw, bh = self.resizing_bbox['coords']
+                bx = int(self.resizing_bbox['coords'][0] * self.scale_factor)
+                by = int(self.resizing_bbox['coords'][1] * self.scale_factor)
+                bw = int(self.resizing_bbox['coords'][2] * self.scale_factor)
+                bh = int(self.resizing_bbox['coords'][3] * self.scale_factor)
                 if self.resize_corner == 'top-left':
                     new_x = min(event.x, bx + bw - 1)
                     new_y = min(event.y, by + bh - 1)
                     new_w = (bx + bw) - new_x
                     new_h = (by + bh) - new_y
-                    self.resizing_bbox['coords'] = (new_x, new_y, max(1, new_w), max(1, new_h))
+                    self.resizing_bbox['coords'] = ((new_x / self.scale_factor), (new_y / self.scale_factor), max(1, new_w / self.scale_factor), max(1, new_h / self.scale_factor))
                 elif self.resize_corner == 'bottom-right':
                     new_w = max(1, event.x - bx)
                     new_h = max(1, event.y - by)
-                    self.resizing_bbox['coords'] = (bx, by, new_w, new_h)
+                    self.resizing_bbox['coords'] = (bx / self.scale_factor, by / self.scale_factor, new_w / self.scale_factor, new_h / self.scale_factor)
                 elif self.resize_corner == 'top-right':
                     new_w = max(1, event.x - bx)
                     new_h = max(1, (by + bh) - event.y)
-                    self.resizing_bbox['coords'] = (bx, event.y, new_w, new_h)
+                    self.resizing_bbox['coords'] = (bx / self.scale_factor, event.y / self.scale_factor, new_w / self.scale_factor, new_h / self.scale_factor)
                 elif self.resize_corner == 'bottom-left':
                     new_w = max(1, (bx + bw) - event.x)
                     new_h = max(1, event.y - by)
-                    self.resizing_bbox['coords'] = (event.x, by, new_w, new_h)
+                    self.resizing_bbox['coords'] = (event.x / self.scale_factor, by / self.scale_factor, new_w / self.scale_factor, new_h / self.scale_factor)
                 self.display_frame()  # Redraw everything
 
     def on_mouse_release(self, event):
@@ -493,7 +509,10 @@ class LabelTool:
             # Create a new bounding box
             x1, y1 = min(self.start_x, event.x), min(self.start_y, event.y)
             x2, y2 = max(self.start_x, event.x), max(self.start_y, event.y)
-            new_bbox = {'coords': (x1, y1, x2 - x1, y2 - y1), 'class_id': 0, 'color': '', 'action': ''}  # Default class_id to 0
+            # Store original coordinates before scaling
+            original_x1, original_y1 = x1 / self.scale_factor, y1 / self.scale_factor
+            original_x2, original_y2 = x2 / self.scale_factor, y2 / self.scale_factor
+            new_bbox = {'coords': (original_x1, original_y1, original_x2 - original_x1, original_y2 - original_y1), 'class_id': 0, 'color': '', 'action': '', 'gender': ''}  # Default class_id to 0
             self.bboxes.append(new_bbox)
             self.display_frame()  # Redraw everything
             self.open_edit_dialog(new_bbox)  # Prompt to set ID
@@ -550,12 +569,17 @@ class LabelTool:
         action_entry.pack(pady=5)
         action_entry.insert(0, bbox.get('action', ''))  # Pre-fill with current action
 
+        tk.Label(edit_window, text="Enter gender:").pack(pady=5)
+        gender_entry = Entry(edit_window)
+        gender_entry.pack(pady=5)
+        gender_entry.insert(0, bbox.get('gender', ''))  # Pre-fill with current gender
         def update_values():            
             # Get the new ID
             self.save()
             new_id = id_entry.get()
             color = color_entry.get()
             action = action_entry.get()
+            gender = gender_entry.get()
             # Check if new_id already exists in current frame's bounding boxes
             if new_id.isdigit():
                 new_id = int(new_id)
@@ -564,10 +588,11 @@ class LabelTool:
                     messagebox.showerror("Error", f"ID {new_id} already exists in this frame. Please choose a unique ID.")
                     return
 
-                # Update the bounding box ID, color, and action
+                # Update the bounding box ID, color, action, and gender
                 bbox['class_id'] = new_id
                 bbox['color'] = color
                 bbox['action'] = action
+                bbox['gender'] = gender
                 self.display_frame()
                 edit_window.destroy()
 
@@ -599,8 +624,7 @@ class LabelTool:
         Button(edit_window, text="Delete BB", command=delete_bbox).pack(side=tk.LEFT, padx=5)
         Button(edit_window, text="Edit BB", command=enable_edit_mode).pack(side=tk.RIGHT, padx=5)
         edit_window.bind('<Return>', lambda event: update_values())
-        
-       
+
     def on_info_click(self, event):
         """Handle mouse click event on the info text box."""
         # Get the clicked line number
@@ -616,7 +640,10 @@ class LabelTool:
         """Change cursor when hovering over resize handles."""
         cursor = ""
         for bbox in self.bboxes:
-            bx, by, bw, bh = bbox['coords']
+            bx = int(bbox['coords'][0] * self.scale_factor)
+            by = int(bbox['coords'][1] * self.scale_factor)
+            bw = int(bbox['coords'][2] * self.scale_factor)
+            bh = int(bbox['coords'][3] * self.scale_factor)
             if self.is_near_corner(event.x, event.y, bx, by, bw, bh):
                 cursor = "hand2"  # Change to a hand cursor
                 break
