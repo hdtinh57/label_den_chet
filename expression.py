@@ -3,27 +3,37 @@ import json
 import csv
 import openai
 import re
-
+from prompt_gen import generate_prompts
 # Configuration
-# openai.api_key = "api_ben_mess"  # Replace with your OpenAI API key
-raw_sentence_file = "prompt_gen/0000/elements_prompts.txt"  # Replace with the actual path
-labels_folder = "labels_with_ids/0000"  # Replace with the actual path
-elements_folder = "elements/0000"  # Replace with the actual path
-output_folder = "expression/0000"  # Replace with the actual path
+# openai.api_key = "api ne "  # Replace with your OpenAI API key
+prompts_output_folder = "prompt_gen"  # Replace with the actual path
+labels_folder = "labels_with_ids"  # Replace with the actual path
+elements_folder = "elements"  # Replace with the actual path
+output_folder = "expression"  # Replace with the actual path
 
 def main():
-    # Read raw sentences from file
-    with open(raw_sentence_file, 'r') as file:
-        raw_sentences = [line.strip() for line in file.readlines()]
+    # Generate prompts using generate_prompts function
+    prompt_file_paths = generate_prompts(elements_folder, prompts_output_folder)
 
-    # Parse elements from CSV files
-    element_data = parse_elements(elements_folder)
+    # Process each generated prompt file
+    for i, prompt_file_path in enumerate(prompt_file_paths):
+        # Determine the subfolder name for each elements file
+        subfolder_name = f"{i:04d}"
+        subfolder_path = os.path.join(output_folder, subfolder_name)
+        os.makedirs(subfolder_path, exist_ok=True)
 
-    # Process each raw sentence
-    for raw_sentence in raw_sentences:
-        matching_ids = find_matching_ids(raw_sentence, element_data)
-        frame_data = filter_frames(labels_folder, matching_ids)
-        generate_json_files(raw_sentence, frame_data, output_folder)
+        # Read raw sentences from the generated prompt file
+        with open(prompt_file_path, 'r') as file:
+            raw_sentences = [line.strip() for line in file.readlines()]
+
+        # Parse elements from CSV files
+        element_data = parse_elements(elements_folder)
+
+        # Process each raw sentence
+        for raw_sentence in raw_sentences:
+            matching_ids = find_matching_ids(raw_sentence, element_data)
+            frame_data = filter_frames(labels_folder, matching_ids)
+            generate_json_files(raw_sentence, frame_data, subfolder_path)
 
 def parse_elements(elements_folder):
     """Parse the elements CSV files to collect the data."""
@@ -55,25 +65,28 @@ def find_matching_ids(prompt, element_data):
 def filter_frames(labels_folder, matching_ids):
     """Filter frames to find all IDs matching the attributes."""
     frame_data = {}
-    for file in os.listdir(labels_folder):
-        if file.endswith(".txt"):
-            frame_number = int(file.split('.')[0])  # Assuming filename is like "000001.txt"
-            file_path = os.path.join(labels_folder, file)
+    for subfolder in os.listdir(labels_folder):
+        subfolder_path = os.path.join(labels_folder, subfolder)
+        if os.path.isdir(subfolder_path):
+            for file in os.listdir(subfolder_path):
+                if file.endswith(".txt"):
+                    frame_number = int(file.split('.')[0])  # Assuming filename is like "000001.txt"
+                    file_path = os.path.join(subfolder_path, file)
 
-            with open(file_path, 'r') as f:
-                lines = f.readlines()
-                frame_ids = []
-                for line in lines:
-                    parts = line.strip().split()
-                    id_in_frame = int(parts[1])
-                    if id_in_frame in matching_ids:
-                        frame_ids.append(id_in_frame)
+                    with open(file_path, 'r') as f:
+                        lines = f.readlines()
+                        frame_ids = []
+                        for line in lines:
+                            parts = line.strip().split()
+                            id_in_frame = int(parts[1])
+                            if id_in_frame in matching_ids:
+                                frame_ids.append(id_in_frame)
 
-                if frame_ids:
-                    frame_data[frame_number] = sorted(frame_ids)
+                        if frame_ids:
+                            frame_data[frame_number] = sorted(frame_ids)
     return frame_data
 
-def generate_json_files(raw_sentence, frame_data, output_folder):
+def generate_json_files(raw_sentence, frame_data, subfolder_path):
     """Generate JSON files with paraphrased sentences."""
     generated_sentences = set()  # Store sentences to avoid repetition
     counter = 0
@@ -97,7 +110,7 @@ def generate_json_files(raw_sentence, frame_data, output_folder):
 
             # Save JSON file
             json_filename = f"{sanitized_prompt}.json"
-            json_path = os.path.join(output_folder, json_filename)
+            json_path = os.path.join(subfolder_path, json_filename)
             with open(json_path, 'w') as json_file:
                 json.dump(json_data, json_file, indent=4)
             counter += 1
@@ -129,3 +142,4 @@ def sanitize_filename(prompt):
 
 if __name__ == "__main__":
     main()
+
